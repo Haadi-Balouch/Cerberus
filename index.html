@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cerberus Security Scanner</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useCallback } = React;
+
+        // ============================================
+        // API Configuration
+        // ============================================
+        const API_BASE = 'http://localhost:5000';
+
+        // ============================================
+        // Socket.IO Singleton - ONLY ONE CONNECTION EVER
+        // ============================================
+        let globalSocket = null;
+
+        function initializeSocket() {
+            if (globalSocket && globalSocket.connected) {
+                console.log('Socket already exists and connected');
+                return globalSocket;
+            }
+
+            console.log('Creating Socket.IO instance...');
+            globalSocket = io(API_BASE, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 2000,
+                timeout: 10000,
+                forceNew: false,
+                multiplex: true
+            });
+
+            return globalSocket;
+        }
+
+        // ============================================
+        // Icon Components
+        // ============================================
+        const Shield = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.618 5.984A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+        );
+
+        const Settings = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+        );
+
+        const FileText = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+        );
+
+        const Target = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+
+        const Play = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+
+        const Loader = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+        );
+
+        const Download = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+        );
+
+        const AlertTriangle = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+        );
+
+        const CheckCircle = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+
+        const XCircle = ({ className }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+
+        // ============================================
+        // Main Component
+        // ============================================
+        const CerberusGUI = () => {
+            // Custom Hook for Session Storage
+            const usePersistedState = (key, defaultValue) => {
+                const [state, setState] = useState(() => {
+                    try {
+                        const stored = sessionStorage.getItem(key);
+                        return stored ? JSON.parse(stored) : defaultValue;
+                    } catch (e) {
+                        return defaultValue;
+                    }
+                });
+
+                useEffect(() => {
+                    try {
+                        sessionStorage.setItem(key, JSON.stringify(state));
+                    } catch (e) {
+                        console.warn('Failed to save state:', e);
+                    }
+                }, [key, state]);
+
+                return [state, setState];
+            };
+
+            // State with Persistence
+            const [target, setTarget] = usePersistedState('cerberus_target', '');
+            const [selectedProfile, setSelectedProfile] = usePersistedState('cerberus_profile', 'standard');
+            const [customModules, setCustomModules] = usePersistedState('cerberus_custom_modules', {
+                headers: true, admin: true, xss: false, sqli: false, dir: false,
+                recon: true, ports: true, cve: true
+            });
+            const [wordlist, setWordlist] = usePersistedState('cerberus_wordlist', '');
+            const [workers, setWorkers] = usePersistedState('cerberus_workers', 15);
+            const [rateLimit, setRateLimit] = usePersistedState('cerberus_rate', 0);
+            const [skipAuth, setSkipAuth] = usePersistedState('cerberus_skip_auth', false);
+            const [dryRun, setDryRun] = usePersistedState('cerberus_dry_run', false);
+            
+            // Volatile State (High frequency updates)
+            const [scanning, setScanning] = useState(false);
+            const [scanProgress, setScanProgress] = useState(0);
+            const [currentPhase, setCurrentPhase] = useState('');
+            const [scanResults, setScanResults] = useState(null);
+            const [logs, setLogs] = useState([]);
+            
+            const [activeTab, setActiveTab] = usePersistedState('cerberus_tab', 'config');
+
+            // Local State (No Persistence needed)
+            const [showAuthModal, setShowAuthModal] = useState(false);
+            const [connected, setConnected] = useState(false);
+
+            const logEndRef = useRef(null);
+            const socketRef = useRef(null);
+            const handlersAttached = useRef(false);
+            const lastPhaseRef = useRef('');
+
+            // Sync with Backend Status on Mount
+            useEffect(() => {
+                const syncStatus = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/scan/status`);
+                        const data = await res.json();
+                        if (data.running) {
+                            if (!scanning) setScanning(true);
+                            setScanProgress(data.progress);
+                            setCurrentPhase(data.phase);
+                        } else if (scanning) {
+                             setScanning(false);
+                        }
+                    } catch (e) {
+                        console.error('Failed to sync status:', e);
+                    }
+                };
+
+                const fetchLastResults = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/scan/results`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            setScanResults(data);
+                            // If we have results and not scanning, maybe show a success log?
+                            // But let's not clutter. Just restoring state.
+                        }
+                    } catch (e) {
+                        console.log('No previous results found or failed to fetch');
+                    }
+                };
+
+                syncStatus();
+                fetchLastResults();
+                
+                // Optional: Polling every few seconds to ensure sync
+                const interval = setInterval(syncStatus, 5000);
+                return () => clearInterval(interval);
+            }, []);
+
+            // Clear Session Helper
+            const clearSession = () => {
+                if (window.confirm('Are you sure you want to clear all session data (logs, results, config)?')) {
+                    sessionStorage.clear();
+                    window.location.reload();
+                }
+            };
+
+            // Scan Profiles
+            const profiles = {
+                quick: {
+                    name: 'Quick Scan',
+                    description: 'Fast, non-intrusive reconnaissance',
+                    modules: ['headers', 'admin', 'recon', 'ports'],
+                    risk: 'SAFE',
+                    color: 'green'
+                },
+                standard: {
+                    name: 'Standard Scan',
+                    description: 'Balanced security assessment',
+                    modules: ['headers', 'admin', 'xss', 'recon', 'ports', 'cve'],
+                    risk: 'MODERATE',
+                    color: 'blue'
+                },
+                aggressive: {
+                    name: 'Aggressive Scan',
+                    description: 'Comprehensive vulnerability testing',
+                    modules: ['headers', 'admin', 'xss', 'sqli', 'dir', 'recon', 'ports', 'cve'],
+                    risk: 'AGGRESSIVE',
+                    color: 'red'
+                },
+                'web-only': {
+                    name: 'Web Application Scan',
+                    description: 'Focus on web vulnerabilities',
+                    modules: ['headers', 'admin', 'xss', 'sqli', 'dir'],
+                    risk: 'MODERATE',
+                    color: 'purple'
+                },
+                'network-only': {
+                    name: 'Network Infrastructure Scan',
+                    description: 'Focus on network vulnerabilities',
+                    modules: ['recon', 'ports', 'cve'],
+                    risk: 'SAFE',
+                    color: 'cyan'
+                },
+                custom: {
+                    name: 'Custom Scan',
+                    description: 'Select specific modules',
+                    modules: [],
+                    risk: 'VARIES',
+                    color: 'gray'
+                }
+            };
+
+            // Module Definitions
+            const modules = {
+                headers: { name: 'Security Headers', risk: 'SAFE', category: 'web', description: 'HTTP security headers analysis' },
+                admin: { name: 'Admin Panel Discovery', risk: 'SAFE', category: 'web', description: 'Common admin paths detection' },
+                xss: { name: 'XSS Detection', risk: 'MODERATE', category: 'web', description: 'Cross-site scripting testing' },
+                sqli: { name: 'SQL Injection', risk: 'AGGRESSIVE', category: 'web', description: 'SQL injection detection' },
+                dir: { name: 'Directory Enum', risk: 'MODERATE', category: 'web', description: 'Directory brute forcing' },
+                recon: { name: 'Reconnaissance', risk: 'SAFE', category: 'network', description: 'Host discovery & DNS' },
+                ports: { name: 'Port Scanning', risk: 'SAFE', category: 'network', description: 'Port & service detection' },
+                cve: { name: 'CVE Lookup', risk: 'SAFE', category: 'network', description: 'Vulnerability database search' }
+            };
+
+            // ============================================
+            // WebSocket Setup (CRITICAL FIX)
+            // ============================================
+            useEffect(() => {
+                console.log('Socket.IO useEffect running...');
+
+                // Get singleton socket
+                const socket = initializeSocket();
+                socketRef.current = socket;
+
+                // Attach handlers only once
+                if (!handlersAttached.current) {
+                    console.log('Attaching event handlers...');
+
+                    socket.on('connect', () => {
+                        console.log('✓ Connected:', socket.id);
+                        setConnected(true);
+                        setLogs(prev => [...prev, {
+                            timestamp: new Date().toLocaleTimeString(),
+                            message: '✓ Connected to backend',
+                            type: 'success'
+                        }]);
+                    });
+
+                    socket.on('disconnect', (reason) => {
+                        console.log('✗ Disconnected:', reason);
+                        setConnected(false);
+                    });
+
+                    socket.on('scan_log', (data) => {
+                        setLogs(prev => [...prev, {
+                            timestamp: data.timestamp || new Date().toLocaleTimeString(),
+                            message: data.message,
+                            type: data.type
+                        }]);
+                    });
+
+                    socket.on('log_history', (history) => {
+                        console.log('Restoring log history:', history.length);
+                        // Deduplicate or just replace? Let's append unique ones or replace if we assume full history
+                        // Safer to replace if it's the full history
+                        setLogs(history.map(h => ({
+                            timestamp: h.timestamp || new Date().toLocaleTimeString(),
+                            message: h.message,
+                            type: h.type
+                        })));
+                    });
+
+                    socket.on('scan_progress', (data) => {
+                        setScanProgress(data.progress);
+                        setCurrentPhase(data.phase);
+                        
+                        // Log phase changes
+                        if (data.phase && data.phase !== lastPhaseRef.current) {
+                            setLogs(prev => [...prev, {
+                                timestamp: new Date().toLocaleTimeString(),
+                                message: ` ➤ Phase: ${data.phase}`,
+                                type: 'info'
+                            }]);
+                            lastPhaseRef.current = data.phase;
+                        }
+                    });
+
+                    socket.on('scan_complete', (results) => {
+                        console.log('✓ Scan complete');
+                        setScanResults(results);
+                        setScanning(false);
+                        setActiveTab('results');
+                        setLogs(prev => [...prev, {
+                            timestamp: new Date().toLocaleTimeString(),
+                            message: '✓ Scan completed!',
+                            type: 'success'
+                        }]);
+                    });
+
+                    socket.on('scan_error', (error) => {
+                        setScanning(false);
+                        setLogs(prev => [...prev, {
+                            timestamp: new Date().toLocaleTimeString(),
+                            message: `✗ Error: ${error.error}`,
+                            type: 'error'
+                        }]);
+                    });
+
+                    handlersAttached.current = true;
+                    console.log('✓ Handlers attached');
+                }
+
+                if (!socket.connected) {
+                    socket.connect();
+                }
+
+                // DON'T disconnect on cleanup
+                return () => {
+                    console.log('useEffect cleanup (socket preserved)');
+                };
+            }, []); // EMPTY - run once
+
+            // Auto-scroll
+            useEffect(() => {
+                const timer = setTimeout(() => {
+                    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }, 100);
+                return () => clearTimeout(timer);
+            }, [logs.length]);
+
+
+            // ============================================
+            // Utility Functions
+            // ============================================
+            const detectTargetType = (input) => {
+                if (!input) return 'unknown';
+                if (input.startsWith('http://') || input.startsWith('https://')) return 'url';
+                const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+                if (ipPattern.test(input)) return 'ip';
+                return 'domain';
+            };
+
+            const getEnabledModules = () => {
+                if (selectedProfile === 'custom') {
+                    return Object.keys(customModules).filter(key => customModules[key]);
+                }
+                return profiles[selectedProfile].modules;
+            };
+
+            const filterModulesByTarget = (moduleList) => {
+                const type = detectTargetType(target);
+                if (type === 'ip') {
+                    return moduleList.filter(mod => modules[mod].category === 'network');
+                }
+                return moduleList;
+            };
+
+            const addLog = (message, type = 'info') => {
+                const timestamp = new Date().toLocaleTimeString();
+                setLogs(prev => [...prev, { timestamp, message, type }]);
+            };
+
+            // ============================================
+            // API Functions (CRITICAL FIX)
+            // ============================================
+            const executeScan = async () => {
+                try {
+                    setScanning(true);
+                    setScanProgress(0);
+                    setLogs([]);
+                    setScanResults(null);
+                    setActiveTab('logs');
+
+                    // Prepare scan configuration
+                    const enabledMods = getEnabledModules();
+                    const filteredMods = filterModulesByTarget(enabledMods);
+
+                    const config = {
+                        target: target,
+                        modules: filteredMods,
+                        workers: workers,
+                        rate: rateLimit,
+                        wordlist: wordlist || null
+                    };
+                    setActiveTab('logs');
+                    setScanning(true);
+
+                    // Call backend API
+                    const response = await fetch(`${API_BASE}/api/scan/start`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(config)
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Failed to start scan');
+                    }
+
+                    addLog(' Scan request sent to backend', 'success');
+
+                } catch (error) {
+                    addLog(` Error starting scan: ${error.message}`, 'error');
+                    setScanning(false);
+                }
+            };
+
+            const handleStartScan = () => {
+                if (!target) {
+                    addLog(' Error: Target is required!', 'error');
+                    return;
+                }
+
+                if (!connected) {
+                    addLog(' Error: Not connected to backend. Ensure server is running on http://localhost:5000', 'error');
+                    return;
+                }
+
+                if (dryRun) {
+                    addLog(' DRY RUN MODE - Preview only, no actual scanning', 'warning');
+                    setActiveTab('logs');
+                    const enabledMods = getEnabledModules();
+                    const filteredMods = filterModulesByTarget(enabledMods);
+                    addLog(`Target: ${target}`, 'info');
+                    addLog(`Profile: ${profiles[selectedProfile].name}`, 'info');
+                    addLog(`Modules: ${filteredMods.join(', ')}`, 'info');
+                    addLog('✓ Scan plan validated successfully', 'success');
+                    return;
+                }
+
+                if (!skipAuth) {
+                    setShowAuthModal(true);
+                } else {
+                    executeScan();
+                }
+            };
+
+            // Download report function (CRITICAL FIX)
+            const downloadReport = async (fileType) => {
+                try {
+                    const response = await fetch(`${API_BASE}/api/scan/download/${fileType}`);
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Download failed');
+                    }
+
+                    // Create blob and download
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `cerberus_report_${Date.now()}.${fileType}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+
+                    addLog(`✓ ${fileType.toUpperCase()} report downloaded`, 'success');
+                } catch (error) {
+                    addLog(` Download failed: ${error.message}`, 'error');
+                }
+            };
+
+            const handleProfileChange = (profile) => {
+                setSelectedProfile(profile);
+                if (profile !== 'custom') {
+                    const newModules = { ...customModules };
+                    Object.keys(newModules).forEach(key => {
+                        newModules[key] = profiles[profile].modules.includes(key);
+                    });
+                    setCustomModules(newModules);
+                }
+            };
+
+            const getRiskColor = (risk) => {
+                switch (risk) {
+                    case 'SAFE': return 'text-green-600 bg-green-50';
+                    case 'MODERATE': return 'text-yellow-600 bg-yellow-50';
+                    case 'AGGRESSIVE': return 'text-red-600 bg-red-50';
+                    default: return 'text-gray-600 bg-gray-50';
+                }
+            };
+
+            // Calculate vulnerability statistics (CRITICAL FIX)
+            const getVulnStats = () => {
+                if (!scanResults) return { critical: 0, high: 0, medium: 0, low: 0 };
+
+                let critical = 0, high = 0, medium = 0, low = 0;
+
+                // 1. Count CVEs from ports
+                scanResults.ports?.forEach(port => {
+                    port.cves?.forEach(cve => {
+                        const severity = (cve.severity || '').toUpperCase();
+                        if (severity === 'CRITICAL') critical++;
+                        else if (severity === 'HIGH') high++;
+                        else if (severity === 'MEDIUM') medium++;
+                        else if (severity === 'LOW') low++;
+                    });
+                });
+
+                // 2. Count Web Vulnerabilities
+                const web = scanResults.web || {};
+
+                // SQL Injection -> CRITICAL
+                if (web.sqli?.sqli) {
+                     const count = web.sqli.details?.length || 1;
+                     critical += count;
+                }
+
+                // XSS -> HIGH
+                if (web.xss?.xss) {
+                    const count = web.xss.findings?.length || 1;
+                    high += count;
+                }
+
+                // Missing Headers -> LOW
+                if (web.headers && !web.headers.secure) {
+                    const count = web.headers.missing_headers?.length || 0;
+                    low += count;
+                }
+
+                // Admin Panels -> MEDIUM
+                if (web.admin_panels?.length > 0) {
+                    medium += web.admin_panels.length;
+                }
+
+                return { critical, high, medium, low };
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+                    {/* Header */}
+                    <div className="bg-slate-800/50 backdrop-blur-sm border-b border-slate-700/50">
+                        <div className="max-w-7xl mx-auto px-6 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Shield className="w-8 h-8 text-cyan-400" />
+                                    <div>
+                                        <h1 className="text-2xl font-bold text-white">Cerberus Security Scanner</h1>
+                                        <p className="text-sm text-slate-400">Professional Vulnerability Assessment Framework v2.0</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={clearSession}
+                                        className="px-3 py-1 rounded-lg text-sm font-medium bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+                                        title="Clear session data and reload"
+                                    >
+                                        Reset App
+                                    </button>
+                                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${connected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                                        }`}>
+                                        {connected ? '● Connected' : '○ Disconnected'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-w-7xl mx-auto px-6 py-8">
+                        {/* Tab Navigation */}
+                        <div className="flex gap-2 mb-6">
+                            {['config', 'logs', 'results'].map(tab => (
+                                <button
+                                    key={tab}
+                                    onClick={() => setActiveTab(tab)}
+                                    className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === tab
+                                        ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30'
+                                        : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50'
+                                        }`}
+                                >
+                                    {tab === 'config' && <Settings className="w-4 h-4 inline mr-2" />}
+                                    {tab === 'logs' && <FileText className="w-4 h-4 inline mr-2" />}
+                                    {tab === 'results' && <Target className="w-4 h-4 inline mr-2" />}
+                                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Configuration Tab */}
+                        {activeTab === 'config' && (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* Left Column - Target & Profile */}
+                                <div className="lg:col-span-2 space-y-6">
+                                    {/* Target Configuration */}
+                                    <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                                            <Target className="w-5 h-5 text-cyan-400" />
+                                            Target Configuration
+                                        </h3>
+
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                                    Target (IP/Domain/URL) *
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={target}
+                                                    onChange={(e) => setTarget(e.target.value)}
+                                                    placeholder="example.com or https://example.com or 192.168.1.1"
+                                                    className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                                                />
+                                                {target && (
+                                                    <p className="mt-2 text-sm text-slate-400">
+                                                        Detected: <span className="text-cyan-400 font-medium">{detectTargetType(target).toUpperCase()}</span>
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Scan Profile Selection */}
+                                    <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                        <h3 className="text-lg font-semibold text-white mb-4">Scan Profile</h3>
+
+                                        <div className="grid grid-cols-2 gap-3 mb-4">
+                                            {Object.entries(profiles).map(([key, profile]) => (
+                                                <button
+                                                    key={key}
+                                                    onClick={() => handleProfileChange(key)}
+                                                    className={`p-4 rounded-lg border-2 transition-all text-left ${selectedProfile === key
+                                                        ? 'border-cyan-500 bg-cyan-500/10'
+                                                        : 'border-slate-600 bg-slate-900/30 hover:border-slate-500'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-start justify-between mb-2">
+                                                        <span className="font-medium text-white">{profile.name}</span>
+                                                        <span className={`text-xs px-2 py-1 rounded ${getRiskColor(profile.risk)}`}>
+                                                            {profile.risk}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-sm text-slate-400">{profile.description}</p>
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Custom Module Selection */}
+                                        {selectedProfile === 'custom' && (
+                                            <div className="mt-4 p-4 bg-slate-900/50 rounded-lg">
+                                                <h4 className="text-sm font-medium text-white mb-3">Select Modules</h4>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {Object.entries(modules).map(([key, mod]) => (
+                                                        <label key={key} className="flex items-center gap-2 p-2 hover:bg-slate-800/50 rounded cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={customModules[key]}
+                                                                onChange={(e) => setCustomModules({ ...customModules, [key]: e.target.checked })}
+                                                                className="w-4 h-4 text-cyan-500 rounded focus:ring-cyan-500"
+                                                            />
+                                                            <div className="flex-1">
+                                                                <div className="text-sm text-white">{mod.name}</div>
+                                                                <div className="text-xs text-slate-400">{mod.category}</div>
+                                                            </div>
+                                                            <span className={`text-xs px-2 py-0.5 rounded ${getRiskColor(mod.risk)}`}>
+                                                                {mod.risk}
+                                                            </span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Advanced Options */}
+                                    <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                        <h3 className="text-lg font-semibold text-white mb-4">Advanced Options</h3>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                                    Worker Threads
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={workers}
+                                                    onChange={(e) => setWorkers(parseInt(e.target.value))}
+                                                    min="1"
+                                                    max="50"
+                                                    className="w-full px-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                                    Rate Limit (seconds)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={rateLimit}
+                                                    onChange={(e) => setRateLimit(parseFloat(e.target.value))}
+                                                    min="0"
+                                                    step="0.1"
+                                                    className="w-full px-4 py-2 bg-slate-900/50 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-4 space-y-3">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={skipAuth}
+                                                    onChange={(e) => setSkipAuth(e.target.checked)}
+                                                    className="w-4 h-4 text-cyan-500 rounded focus:ring-cyan-500"
+                                                />
+                                                <span className="text-sm text-slate-300">Skip authorization check (lab environments only)</span>
+                                            </label>
+
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={dryRun}
+                                                    onChange={(e) => setDryRun(e.target.checked)}
+                                                    className="w-4 h-4 text-cyan-500 rounded focus:ring-cyan-500"
+                                                />
+                                                <span className="text-sm text-slate-300">Dry run (preview only, no actual scanning)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Right Column - Scan Control */}
+                                <div className="space-y-6">
+                                    {/* Scan Control Panel */}
+                                    <div className="bg-gradient-to-br from-cyan-500/10 to-blue-500/10 backdrop-blur-sm rounded-xl p-6 border border-cyan-500/30">
+                                        <h3 className="text-lg font-semibold text-white mb-4">Scan Control</h3>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleStartScan}
+                                            disabled={scanning || !target || !connected}
+                                            className={`w-full py-4 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${scanning || !target || !connected
+                                                ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                                : 'bg-cyan-500 text-white hover:bg-cyan-600 shadow-lg shadow-cyan-500/30'
+                                                }`}
+                                        >
+                                            {scanning ? (
+                                                <>
+                                                    <Loader className="w-5 h-5 animate-spin" />
+                                                    Scanning...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Play className="w-5 h-5" />
+                                                    {dryRun ? 'Preview Scan Plan' : 'Start Scan'}
+                                                </>
+                                            )}
+                                        </button>
+
+                                        {scanning && (
+                                            <div className="mt-4">
+                                                <div className="flex justify-between text-sm text-slate-300 mb-2">
+                                                    <span>Progress</span>
+                                                    <span>{Math.round(scanProgress)}%</span>
+                                                </div>
+                                                <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300"
+                                                        style={{ width: `${scanProgress}%` }}
+                                                    />
+                                                </div>
+                                                {currentPhase && (
+                                                    <p className="mt-2 text-sm text-slate-400">{currentPhase}</p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Module Preview */}
+                                    <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                        <h3 className="text-lg font-semibold text-white mb-4">Active Modules</h3>
+
+                                        <div className="space-y-2">
+                                            {filterModulesByTarget(getEnabledModules()).map(mod => (
+                                                <div key={mod} className="flex items-center justify-between p-2 bg-slate-900/50 rounded">
+                                                    <span className="text-sm text-slate-300">{modules[mod].name}</span>
+                                                    <span className={`text-xs px-2 py-1 rounded ${getRiskColor(modules[mod].risk)}`}>
+                                                        {modules[mod].risk}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {filterModulesByTarget(getEnabledModules()).length === 0 && (
+                                            <p className="text-sm text-slate-400 text-center py-4">No modules selected</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Logs Tab */}
+                        {activeTab === 'logs' && (
+                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                        <FileText className="w-5 h-5 text-cyan-400" />
+                                        Scan Logs
+                                    </h3>
+                                    <button
+                                        onClick={() => setLogs([])}
+                                        className="px-3 py-1 text-sm bg-slate-700 text-slate-300 rounded hover:bg-slate-600"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+
+                                <div className="bg-slate-900/80 rounded-lg p-4 h-[600px] overflow-y-auto font-mono text-sm">
+                                    {logs.length === 0 ? (
+                                        <p className="text-slate-500 text-center py-8">No logs yet. Start a scan to see output.</p>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            {logs.map((log, idx) => (
+                                                <div key={idx} className="flex gap-3">
+                                                    <span className="text-slate-500">[{log.timestamp}]</span>
+                                                    <span className={`flex-1 ${log.type === 'error' ? 'text-red-400' :
+                                                        log.type === 'warning' ? 'text-yellow-400' :
+                                                            log.type === 'success' ? 'text-green-400' :
+                                                                'text-slate-300'
+                                                        }`}>
+                                                        {log.message}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            <div ref={logEndRef} />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Results Tab */}
+                        {activeTab === 'results' && (
+                            <div className="space-y-6">
+                                {!scanResults ? (
+                                    <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-12 border border-slate-700/50 text-center">
+                                        <Target className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+                                        <p className="text-slate-400">No scan results yet. Run a scan to see findings.</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Summary Cards */}
+                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                            <div className="bg-gradient-to-br from-red-500/20 to-red-600/10 backdrop-blur-sm rounded-xl p-6 border border-red-500/30">
+                                                <div className="text-3xl font-bold text-white mb-2">{getVulnStats().critical}</div>
+                                                <div className="text-sm text-red-300">Critical</div>
+                                            </div>
+
+                                            <div className="bg-gradient-to-br from-orange-500/20 to-orange-600/10 backdrop-blur-sm rounded-xl p-6 border border-orange-500/30">
+                                                <div className="text-3xl font-bold text-white mb-2">{getVulnStats().high}</div>
+                                                <div className="text-sm text-orange-300">High</div>
+                                            </div>
+
+                                            <div className="bg-gradient-to-br from-yellow-500/20 to-yellow-600/10 backdrop-blur-sm rounded-xl p-6 border border-yellow-500/30">
+                                                <div className="text-3xl font-bold text-white mb-2">{getVulnStats().medium}</div>
+                                                <div className="text-sm text-yellow-300">Medium</div>
+                                            </div>
+
+                                            <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 backdrop-blur-sm rounded-xl p-6 border border-blue-500/30">
+                                                <div className="text-3xl font-bold text-white mb-2">{getVulnStats().low}</div>
+                                                <div className="text-sm text-blue-300">Low</div>
+                                            </div>
+                                        </div>
+
+                                        {/* Open Ports */}
+                                        {scanResults.ports && scanResults.ports.length > 0 && (
+                                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                                <h3 className="text-lg font-semibold text-white mb-4">Open Ports & Services</h3>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full">
+                                                        <thead>
+                                                            <tr className="border-b border-slate-700">
+                                                                <th className="text-left py-3 px-4 text-sm font-medium text-slate-300">Port</th>
+                                                                <th className="text-left py-3 px-4 text-sm font-medium text-slate-300">Service</th>
+                                                                <th className="text-left py-3 px-4 text-sm font-medium text-slate-300">Version</th>
+                                                                <th className="text-left py-3 px-4 text-sm font-medium text-slate-300">CVEs</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {scanResults.ports.map((port, idx) => (
+                                                                <tr key={idx} className="border-b border-slate-700/50">
+                                                                    <td className="py-3 px-4 text-white">{port.port}</td>
+                                                                    <td className="py-3 px-4 text-slate-300">{port.service}</td>
+                                                                    <td className="py-3 px-4 text-slate-400">{port.version}</td>
+                                                                    <td className="py-3 px-4">
+                                                                        <span className={`px-2 py-1 rounded text-xs ${(port.cves?.length || 0) > 0
+                                                                            ? 'bg-red-500/20 text-red-400'
+                                                                            : 'bg-green-500/20 text-green-400'
+                                                                            }`}>
+                                                                            {port.cves?.length || 0} CVE{(port.cves?.length || 0) !== 1 ? 's' : ''}
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Web Findings */}
+                                        {scanResults.web && Object.keys(scanResults.web).length > 0 && (
+                                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                                <h3 className="text-lg font-semibold text-white mb-4">Web Security Findings</h3>
+                                                <div className="space-y-3">
+                                                    {scanResults.web.xss && (
+                                                        <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded">
+                                                            <span className="text-slate-300">Cross-Site Scripting (XSS)</span>
+                                                            {scanResults.web.xss.xss ? (
+                                                                <span className="flex items-center gap-2 text-red-400">
+                                                                    <XCircle className="w-4 h-4" />
+                                                                    Vulnerable ({scanResults.web.xss.findings?.length || 0} findings)
+                                                                </span>
+                                                            ) : (
+                                                                <span className="flex items-center gap-2 text-green-400">
+                                                                    <CheckCircle className="w-4 h-4" />
+                                                                    Secure
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {scanResults.web.sqli && (
+                                                        <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded">
+                                                            <span className="text-slate-300">SQL Injection</span>
+                                                            {scanResults.web.sqli.sqli ? (
+                                                                <span className="flex items-center gap-2 text-red-400">
+                                                                    <XCircle className="w-4 h-4" />
+                                                                    Vulnerable ({scanResults.web.sqli.details?.length || 0} findings)
+                                                                </span>
+                                                            ) : (
+                                                                <span className="flex items-center gap-2 text-green-400">
+                                                                    <CheckCircle className="w-4 h-4" />
+                                                                    Secure
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {scanResults.web.headers && (
+                                                        <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded">
+                                                            <span className="text-slate-300">Security Headers</span>
+                                                            {scanResults.web.headers.secure ? (
+                                                                <span className="flex items-center gap-2 text-green-400">
+                                                                    <CheckCircle className="w-4 h-4" />
+                                                                    Secure
+                                                                </span>
+                                                            ) : (
+                                                                <span className="flex items-center gap-2 text-yellow-400">
+                                                                    <AlertTriangle className="w-4 h-4" />
+                                                                    {scanResults.web.headers.missing_headers?.length || 0} Missing
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {scanResults.web.admin_panels && scanResults.web.admin_panels.length > 0 && (
+                                                        <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded">
+                                                            <span className="text-slate-300">Admin Panels Found</span>
+                                                            <span className="flex items-center gap-2 text-yellow-400">
+                                                                <AlertTriangle className="w-4 h-4" />
+                                                                {scanResults.web.admin_panels.length} paths
+                                                            </span>
+                                                        </div>
+                                                    )}
+
+                                                    {scanResults.web.directories && scanResults.web.directories.length > 0 && (
+                                                        <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded">
+                                                            <span className="text-slate-300">Accessible Directories</span>
+                                                            <span className="flex items-center gap-2 text-blue-400">
+                                                                {scanResults.web.directories.length} paths
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Export Options */}
+                                        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700/50">
+                                            <h3 className="text-lg font-semibold text-white mb-4">Export Reports</h3>
+                                            <div className="flex gap-3">
+                                                <button
+                                                    onClick={() => downloadReport('json')}
+                                                    disabled={!scanResults.json_file}
+                                                    className="flex items-center gap-2 px-4 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 disabled:bg-slate-700 disabled:cursor-not-allowed"
+                                                >
+                                                    <Download className="w-4 h-4" />
+                                                    Download JSON
+                                                </button>
+                                                <button
+                                                    onClick={() => downloadReport('pdf')}
+                                                    disabled={!scanResults.pdf_file}
+                                                    className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-slate-700 disabled:cursor-not-allowed"
+                                                >
+                                                    <Download className="w-4 h-4" />
+                                                    Download PDF
+                                                </button>
+                                            </div>
+                                            {(!scanResults.json_file || !scanResults.pdf_file) && (
+                                                <p className="mt-2 text-sm text-yellow-400">
+                                                    ⚠️ Some reports may not have been generated due to errors
+                                                </p>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Authorization Modal */}
+                    {showAuthModal && (
+                        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+                            <div className="bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4 border border-slate-700">
+                                <div className="flex items-start gap-3 mb-4">
+                                    <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0" />
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-white mb-2">⚖️ Authorization Required</h3>
+                                        <p className="text-sm text-slate-300 mb-4">
+                                            You are about to scan: <span className="text-cyan-400 font-medium">{target}</span>
+                                        </p>
+                                        <div className="text-sm text-slate-400 space-y-2 mb-4">
+                                            <p>• Unauthorized security scanning may be illegal</p>
+                                            <p>• You must have explicit written permission</p>
+                                            <p>• Violating this may result in prosecution</p>
+                                            <p>• This tool is for authorized testing only</p>
+                                        </div>
+                                        <p className="text-sm font-medium text-white">
+                                            By continuing, you confirm you have proper authorization.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => setShowAuthModal(false)}
+                                        className="flex-1 px-4 py-2 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowAuthModal(false);
+                                            executeScan();
+                                        }}
+                                        className="flex-1 px-4 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600"
+                                    >
+                                        I Accept - Start Scan
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // Render the component
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<CerberusGUI />);
+    </script>
+</body>
+
+</html>
